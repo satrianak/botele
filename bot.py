@@ -1,5 +1,5 @@
-# B402 NFT Telegram Bot - FIXED VERSION
-# Working version without syntax errors
+# B402 NFT Telegram Bot - BIDIRECTIONAL (Monitor IN & OUT)
+# Monitor transfers FROM AND TO wallet kita
 
 import requests
 import asyncio
@@ -119,6 +119,25 @@ def get_transfers():
     print("  ✗ All failed")
     return []
 
+def is_watched_transfer(tx):
+    """Check if transfer involves WATCHED_WALLET (FROM or TO)"""
+    from_addr = tx.get("from", "").lower()
+    to_addr = tx.get("to", "").lower()
+    wallet = WATCHED_WALLET.lower()
+    
+    # Return True jika wallet kita ada di FROM atau TO
+    return from_addr == wallet or to_addr == wallet
+
+def get_direction(tx):
+    """Tentukan arah transfer (IN atau OUT)"""
+    from_addr = tx.get("from", "").lower()
+    wallet = WATCHED_WALLET.lower()
+    
+    if from_addr == wallet:
+        return "OUT (Kirim)"
+    else:
+        return "IN (Terima)"
+
 async def check_transfers():
     global bnb_price_cache, last_price_update
     
@@ -141,7 +160,12 @@ async def check_transfers():
     print(f"✓ Processing {len(transfers)}")
     
     for token_id, token_info in WATCHED_TOKEN_IDS.items():
-        token_txs = [tx for tx in transfers if tx.get("tokenID") == token_id]
+        # Filter: token_id match AND wallet involved
+        token_txs = [tx for tx in transfers 
+                     if tx.get("tokenID") == token_id and is_watched_transfer(tx)]
+        
+        if token_txs:
+            print(f"  Found {len(token_txs)} of Token ID {token_id}")
         
         for tx in token_txs:
             tx_hash = tx.get("hash")
@@ -149,12 +173,12 @@ async def check_transfers():
                 continue
             
             tracked_txhashes.add(tx_hash)
-            print(f"  🚨 NEW: Token {token_id} - {tx_hash[:10]}")
             
             from_addr = tx.get("from", "?")[:10]
             to_addr = tx.get("to", "?")[:10]
             value = tx.get("value", "0")
             block = tx.get("blockNumber", "?")
+            direction = get_direction(tx)
             
             floor_price = floor_prices_cache.get("price", "N/A")
             change_24h = floor_prices_cache.get("change24h", "N/A")
@@ -166,12 +190,16 @@ async def check_transfers():
                 except:
                     pass
             
+            print(f"  🚨 NEW: Token {token_id} - {direction} - {tx_hash[:10]}")
+            
             msg = f"""
 🚨 <b>NFT TRANSFER!</b>
 
 {token_info['emoji']} <b>{token_info['name']}</b>
 📊 Token ID: {token_id}
 🎯 {token_info['rarity']}
+
+📍 <b>Direction: {direction}</b>
 
 💰 <b>Floor Price:</b>
    <code>{floor_price} BNB</code> (~{floor_usd})
@@ -193,13 +221,19 @@ async def main():
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     
     print("\n" + "=" * 60)
-    print("🤖 B402 NFT TRACKER")
+    print("🤖 B402 NFT TRACKER (BIDIRECTIONAL)")
     print("=" * 60)
     print(f"Wallet: {WATCHED_WALLET}")
     print(f"Tokens: 0 (Bronze), 1 (Silver), 2 (Gold)")
+    print(f"Mode: Monitor IN + OUT transfers")
     print("=" * 60 + "\n")
     
-    await send_notification("🤖 <b>Bot Started!</b>\n\nMonitoring Token ID 0, 1, 2")
+    await send_notification(
+        f"🤖 <b>Bot Started! (BIDIRECTIONAL)</b>\n\n"
+        f"Monitoring:\n"
+        f"✓ Token ID 0, 1, 2\n"
+        f"✓ Transfers IN & OUT"
+    )
     
     try:
         while True:
