@@ -1,23 +1,20 @@
-# B402 NFT Telegram Bot - Railway Deployment Version
-# Optimized untuk running di Railway.app dengan environment variables
+# B402 NFT Telegram Bot - Railway Version (Direct Input)
+# LANGSUNG INPUT TOKEN DI SINI - BUKAN ENV VARIABLES
 
-import os
-import time
 import requests
 import asyncio
 from telegram import Bot
-from telegram.error import TelegramError
 from datetime import datetime, timedelta
 
 # ╔══════════════════════════════════════════════════════════╗
-# ║         ENVIRONMENT VARIABLES (Set di Railway)          ║
+# ║     ⬇️ SESUAIKAN DENGAN DATA ANDA DI BAWAH INI ⬇️       ║
 # ╚══════════════════════════════════════════════════════════╝
 
-TELEGRAM_BOT_TOKEN = os.environ.get("7925753319:AAEWkxrivRuDQHiau8fVQ9hPkOlgvGU5i9c", "")
-TELEGRAM_CHAT_ID = os.environ.get("519076139", "")
-ETHERSCAN_V2_API_KEY = os.environ.get("QKYIDZBDII914H8M2UFEZFF8A38J38WAQF", "")
+ETHERSCAN_V2_API_KEY = "QKYIDZDBII9I4H8M2UFEZFF8A38J38WAQF"  # Ganti dengan API key Anda
+TELEGRAM_BOT_TOKEN = "7925753319:AAEWkxrivRuDQHiau8fVQ9hPkOlgvGU5i9c"  # Ganti dengan token Anda
+TELEGRAM_CHAT_ID = "519076139"  # Ganti dengan chat ID Anda
 
-# Configuration
+# Konfigurasi
 WATCHED_WALLET = "0x39Dcdd14A0c40E19Cd8c892fD00E9e7963CD49D3"
 CONTRACT_ADDRESS = "0xafcD15f17D042eE3dB94CdF6530A97bf32A74E02"
 
@@ -26,12 +23,12 @@ WATCHED_TOKEN_IDS = {
     "2": {"name": "Gold Mystery Box", "emoji": "🏆", "rarity": "Sangat Langka (1%)"}
 }
 
-CHECK_INTERVAL = 180  # 3 menit
+CHECK_INTERVAL = 180
 CHAIN_ID = "56"
 TIMEOUT = 8
 
 # ╔══════════════════════════════════════════════════════════╗
-# ║                    BOT LOGIC                            ║
+# ║              JANGAN UBAH DIBAWAH INI                   ║
 # ╚══════════════════════════════════════════════════════════╝
 
 tracked_txhashes = set()
@@ -40,7 +37,6 @@ last_api_used = None
 floor_prices_cache = {}
 bnb_price_cache = None
 last_price_update = None
-last_successful_api = None
 
 async def send_notification(message: str):
     """Kirim pesan ke Telegram"""
@@ -50,12 +46,12 @@ async def send_notification(message: str):
             text=message,
             parse_mode="HTML"
         )
-        print(f"✓ Notifikasi terkirim")
+        print(f"✓ Notif terkirim")
     except Exception as e:
-        print(f"✗ Error send notif: {e}")
+        print(f"✗ Error: {e}")
 
 def get_bnb_price_usd():
-    """Ambil harga BNB dari CoinGecko"""
+    """Ambil harga BNB"""
     try:
         response = requests.get(
             "https://api.coingecko.com/api/v3/simple/price",
@@ -68,7 +64,7 @@ def get_bnb_price_usd():
             print(f"✓ BNB: ${bnb_price:.2f}")
             return bnb_price
     except Exception as e:
-        print(f"⚠ CoinGecko: {type(e).__name__}")
+        print(f"⚠ CoinGecko: {e}")
     return None
 
 def get_floor_prices():
@@ -87,12 +83,12 @@ def get_floor_prices():
             print(f"✓ Floor: {floor_price} BNB")
             return {"floor_price": floor_price, "change_24h": change_24h}
     except Exception as e:
-        print(f"⚠ OKX: {type(e).__name__}")
+        print(f"⚠ OKX: {e}")
     return None
 
-def get_transfers_from_etherscan_v2():
-    """Coba Etherscan V2 API"""
-    if not ETHERSCAN_V2_API_KEY or ETHERSCAN_V2_API_KEY == "":
+def get_transfers_from_etherscan():
+    """Coba Etherscan V2"""
+    if not ETHERSCAN_V2_API_KEY:
         return None, None
     
     try:
@@ -117,14 +113,12 @@ def get_transfers_from_etherscan_v2():
         if data.get("status") == "1":
             print(f"    ✓ Etherscan OK ({len(data['result'])})")
             return data.get("result", []), "Etherscan V2"
-        else:
-            print(f"    ⚠ {data.get('message', 'Error')}")
     except Exception as e:
-        print(f"    ⚠ {type(e).__name__}")
+        print(f"    ⚠ {e}")
     return None, None
 
 def get_transfers_from_bscscan():
-    """Coba BSCScan API"""
+    """Coba BSCScan"""
     try:
         print(f"  → BSCScan...")
         params = {
@@ -145,38 +139,27 @@ def get_transfers_from_bscscan():
         if data.get("status") == "1":
             print(f"    ✓ BSCScan OK ({len(data['result'])})")
             return data.get("result", []), "BSCScan"
-        else:
-            print(f"    ⚠ {data.get('message', 'Error')}")
     except Exception as e:
-        print(f"    ⚠ {type(e).__name__}")
+        print(f"    ⚠ {e}")
     return None, None
 
 def get_token_transfers():
-    """Try APIs dengan smart retry"""
-    global last_api_used, last_successful_api
+    """Try APIs"""
+    global last_api_used
     
-    print(f"📡 Fetching transfers...")
+    print(f"📡 Fetching...")
     
-    if ETHERSCAN_V2_API_KEY and ETHERSCAN_V2_API_KEY != "":
-        transfers, api = get_transfers_from_etherscan_v2()
-        if transfers is not None:
-            last_api_used = api
-            last_successful_api = "etherscan"
-            return transfers
+    transfers, api = get_transfers_from_etherscan()
+    if transfers is not None:
+        last_api_used = api
+        return transfers
     
     transfers, api = get_transfers_from_bscscan()
     if transfers is not None:
         last_api_used = api
-        last_successful_api = "bscscan"
         return transfers
     
-    if ETHERSCAN_V2_API_KEY and ETHERSCAN_V2_API_KEY != "":
-        transfers, api = get_transfers_from_etherscan_v2()
-        if transfers is not None:
-            last_api_used = api
-            return transfers
-    
-    print("  ✗ All APIs failed")
+    print("  ✗ All failed")
     last_api_used = "FAILED"
     return []
 
@@ -187,7 +170,7 @@ def convert_bnb_to_usd(bnb_amount, bnb_price):
         return "N/A"
 
 async def check_for_transfers():
-    """Main check logic"""
+    """Main check"""
     global bnb_price_cache, last_price_update
     
     print(f"\n⏰ {datetime.now().strftime('%H:%M:%S')}")
@@ -207,7 +190,7 @@ async def check_for_transfers():
         print("  ℹ No transfers")
         return
     
-    print(f"✓ Processing {len(transfers)} transfers")
+    print(f"✓ Processing {len(transfers)}")
     
     for token_id, token_info in WATCHED_TOKEN_IDS.items():
         token_transfers = [tx for tx in transfers if tx.get("tokenID") == token_id]
@@ -251,7 +234,7 @@ async def check_for_transfers():
 
 🔗 https://bscscan.com/tx/{tx_hash}
 
-📡 {last_api_used} | {datetime.now().strftime('%H:%M:%S')}
+📡 {last_api_used}
             """
             
             await send_notification(msg)
@@ -260,38 +243,18 @@ async def main():
     """Main loop"""
     global bot
     
-    # Validate env vars
-    if not TELEGRAM_BOT_TOKEN:
-        print("❌ ERROR: TELEGRAM_BOT_TOKEN not set!")
-        print("Set di Railway: Settings → Variables")
-        exit(1)
-    
-    if not TELEGRAM_CHAT_ID:
-        print("❌ ERROR: TELEGRAM_CHAT_ID not set!")
-        exit(1)
-    
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     
     print("\n" + "=" * 60)
-    print("🤖 B402 NFT TRACKER (RAILWAY DEPLOYMENT)")
+    print("🤖 B402 NFT TRACKER (RAILWAY DIRECT)")
     print("=" * 60)
     print(f"Wallet: {WATCHED_WALLET}")
-    print(f"Monitoring: Token ID 1 & 2")
-    print(f"Interval: {CHECK_INTERVAL}s")
-    
-    if ETHERSCAN_V2_API_KEY:
-        print(f"APIs: Etherscan V2 → BSCScan")
-    else:
-        print(f"APIs: BSCScan (Primary)")
-    
+    print(f"Token ID 1 & 2")
     print("=" * 60 + "\n")
     
     await send_notification(
-        f"🤖 <b>B402 Bot Started!</b>\n\n"
-        f"📍 {WATCHED_WALLET}\n"
-        f"📊 ID 1 (Silver) & ID 2 (Gold)\n"
-        f"🔄 Railway Deployment\n"
-        f"⏱ Every {CHECK_INTERVAL}s"
+        f"🤖 <b>Bot Started!</b>\n\n"
+        f"Monitoring: Token ID 1 & 2"
     )
     
     try:
@@ -300,11 +263,9 @@ async def main():
             await asyncio.sleep(CHECK_INTERVAL)
     except KeyboardInterrupt:
         print("\n❌ Stopped")
-        await send_notification("❌ Bot stopped")
     except Exception as e:
-        print(f"❌ Fatal error: {e}")
-        await send_notification(f"❌ Bot crashed: {str(e)}")
-        raise
+        print(f"❌ Error: {e}")
+        await send_notification(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
