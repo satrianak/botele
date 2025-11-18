@@ -1,5 +1,5 @@
-# B402 NFT Telegram Bot - BIDIRECTIONAL (Monitor IN & OUT)
-# Monitor transfers FROM AND TO wallet kita
+# B402 NFT Telegram Bot - DUAL API KEYS (2 Etherscan Options)
+# Using 2 Paid Etherscan API Keys (STANDARD PLAN)
 
 import requests
 import asyncio
@@ -8,7 +8,10 @@ from datetime import datetime, timedelta
 
 TELEGRAM_BOT_TOKEN = "7925753319:AAEWkxrivRuDQHiau8fVQ9hPkOlgvGU5i9c"
 TELEGRAM_CHAT_ID = "519076139"
-ETHERSCAN_V2_API_KEY = "QKYIDZDBII9I4H8M2UFEZFF8A38J38WAQF"
+
+# PREMIUM API KEYS (STANDARD PLAN) - DUAL OPTIONS
+ETHERSCAN_API_KEY_1 = "QKYIDZDBII914H8M2UFEZFF8A38J38WAQF"
+ETHERSCAN_API_KEY_2 = "7NVVN8ZSM9BUQD8I8H6TU7U97GX5UVQ5RV"
 
 WATCHED_WALLET = "0x39Dcdd14A0c40E19Cd8c892fD00E9e7963CD49D3"
 CONTRACT_ADDRESS = "0xafcD15f17D042eE3dB94CdF6530A97bf32A74E02"
@@ -28,6 +31,7 @@ bot = None
 floor_prices_cache = {}
 bnb_price_cache = None
 last_price_update = None
+last_api_used = None
 
 async def send_notification(message: str):
     try:
@@ -49,7 +53,7 @@ def get_bnb_price():
             print(f"✓ BNB: ${price:.2f}")
             return price
     except Exception as e:
-        print(f"⚠ Price error: {e}")
+        print(f"⚠ Price: {e}")
     return None
 
 def get_floor_price():
@@ -67,38 +71,39 @@ def get_floor_price():
                 "change24h": stats.get("floorPriceChg24")
             }
     except Exception as e:
-        print(f"⚠ Floor error: {e}")
+        print(f"⚠ Floor: {e}")
     return None
 
-def get_transfers():
-    print(f"📡 Fetching...")
-    
-    # Try Etherscan
+def get_transfers_etherscan(api_key, api_name):
+    """Try Etherscan with specific API key"""
     try:
-        if ETHERSCAN_V2_API_KEY:
-            print(f"  → Etherscan...")
-            params = {
-                "chainid": CHAIN_ID,
-                "module": "account",
-                "action": "tokentx",
-                "address": WATCHED_WALLET,
-                "contractaddress": CONTRACT_ADDRESS,
-                "page": 1,
-                "offset": 100,
-                "sort": "desc",
-                "apikey": ETHERSCAN_V2_API_KEY
-            }
-            response = requests.get("https://api.etherscan.io/v2/api", params=params, timeout=TIMEOUT)
-            data = response.json()
-            if data.get("status") == "1":
-                print(f"    ✓ OK ({len(data['result'])})")
-                return data.get("result", [])
+        print(f"  → {api_name}...")
+        params = {
+            "chainid": CHAIN_ID,
+            "module": "account",
+            "action": "tokentx",
+            "address": WATCHED_WALLET,
+            "contractaddress": CONTRACT_ADDRESS,
+            "page": 1,
+            "offset": 100,
+            "sort": "desc",
+            "apikey": api_key
+        }
+        response = requests.get("https://api.etherscan.io/v2/api", params=params, timeout=TIMEOUT)
+        data = response.json()
+        if data.get("status") == "1":
+            print(f"    ✓ OK ({len(data['result'])} transfers)")
+            return data.get("result", []), api_name
+        else:
+            print(f"    ⚠ {data.get('message')}")
     except Exception as e:
         print(f"    ⚠ Error: {e}")
-    
-    # Try BSCScan
+    return None, None
+
+def get_transfers_bscscan():
+    """Fallback: BSCScan"""
     try:
-        print(f"  → BSCScan...")
+        print(f"  → BSCScan (Fallback)...")
         params = {
             "module": "account",
             "action": "tokentx",
@@ -111,32 +116,64 @@ def get_transfers():
         response = requests.get("https://api.bscscan.com/api", params=params, timeout=TIMEOUT)
         data = response.json()
         if data.get("status") == "1":
-            print(f"    ✓ OK ({len(data['result'])})")
-            return data.get("result", [])
+            print(f"    ✓ OK ({len(data['result'])} transfers)")
+            return data.get("result", []), "BSCScan"
+        else:
+            print(f"    ⚠ {data.get('message')}")
     except Exception as e:
         print(f"    ⚠ Error: {e}")
+    return None, None
+
+def get_transfers():
+    global last_api_used
+    print(f"📡 Fetching...")
+    
+    # Try API Key 1 first (3x)
+    for attempt in range(3):
+        transfers, api = get_transfers_etherscan(ETHERSCAN_API_KEY_1, "Etherscan Key 1")
+        if transfers is not None:
+            last_api_used = api
+            return transfers, api
+        if attempt < 2:
+            print(f"    Retry {attempt+1}/2...")
+    
+    # Try API Key 2 (3x)
+    for attempt in range(3):
+        transfers, api = get_transfers_etherscan(ETHERSCAN_API_KEY_2, "Etherscan Key 2")
+        if transfers is not None:
+            last_api_used = api
+            return transfers, api
+        if attempt < 2:
+            print(f"    Retry {attempt+1}/2...")
+    
+    # Fallback BSCScan
+    transfers, api = get_transfers_bscscan()
+    if transfers is not None:
+        last_api_used = api
+        return transfers, api
+    
+    # Retry API Key 1 one more time
+    transfers, api = get_transfers_etherscan(ETHERSCAN_API_KEY_1, "Etherscan Key 1 (Retry)")
+    if transfers is not None:
+        last_api_used = api
+        return transfers, api
     
     print("  ✗ All failed")
-    return []
+    last_api_used = "FAILED"
+    return [], "FAILED"
 
 def is_watched_transfer(tx):
     """Check if transfer involves WATCHED_WALLET (FROM or TO)"""
     from_addr = tx.get("from", "").lower()
     to_addr = tx.get("to", "").lower()
     wallet = WATCHED_WALLET.lower()
-    
-    # Return True jika wallet kita ada di FROM atau TO
     return from_addr == wallet or to_addr == wallet
 
 def get_direction(tx):
     """Tentukan arah transfer (IN atau OUT)"""
     from_addr = tx.get("from", "").lower()
     wallet = WATCHED_WALLET.lower()
-    
-    if from_addr == wallet:
-        return "OUT (Kirim)"
-    else:
-        return "IN (Terima)"
+    return "OUT (Kirim)" if from_addr == wallet else "IN (Terima)"
 
 async def check_transfers():
     global bnb_price_cache, last_price_update
@@ -152,7 +189,7 @@ async def check_transfers():
     if floor_data:
         floor_prices_cache.update(floor_data)
     
-    transfers = get_transfers()
+    transfers, api_used = get_transfers()
     if not transfers:
         print("  ℹ No transfers")
         return
@@ -160,7 +197,6 @@ async def check_transfers():
     print(f"✓ Processing {len(transfers)}")
     
     for token_id, token_info in WATCHED_TOKEN_IDS.items():
-        # Filter: token_id match AND wallet involved
         token_txs = [tx for tx in transfers 
                      if tx.get("tokenID") == token_id and is_watched_transfer(tx)]
         
@@ -193,7 +229,7 @@ async def check_transfers():
             print(f"  🚨 NEW: Token {token_id} - {direction} - {tx_hash[:10]}")
             
             msg = f"""
-🚨 <b>NFT TRANSFER!</b>
+🚨 <b>NFT TRANSFER DETECTED!</b>
 
 {token_info['emoji']} <b>{token_info['name']}</b>
 📊 Token ID: {token_id}
@@ -211,6 +247,8 @@ async def check_transfers():
 📍 Block: {block}
 
 🔗 https://bscscan.com/tx/{tx_hash}
+
+📡 API: {api_used}
             """
             
             await send_notification(msg)
@@ -221,18 +259,19 @@ async def main():
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     
     print("\n" + "=" * 60)
-    print("🤖 B402 NFT TRACKER (BIDIRECTIONAL)")
+    print("🤖 B402 NFT TRACKER (DUAL API)")
     print("=" * 60)
     print(f"Wallet: {WATCHED_WALLET}")
     print(f"Tokens: 0 (Bronze), 1 (Silver), 2 (Gold)")
-    print(f"Mode: Monitor IN + OUT transfers")
+    print(f"API: Dual Etherscan Keys (Primary + Backup)")
     print("=" * 60 + "\n")
     
     await send_notification(
-        f"🤖 <b>Bot Started! (BIDIRECTIONAL)</b>\n\n"
-        f"Monitoring:\n"
-        f"✓ Token ID 0, 1, 2\n"
-        f"✓ Transfers IN & OUT"
+        f"🤖 <b>Bot Started! (DUAL API MODE)</b>\n\n"
+        f"Using: 2x Etherscan Premium API\n"
+        f"Key 1: Primary\n"
+        f"Key 2: Backup\n"
+        f"Status: ✅ Full Monitoring Active"
     )
     
     try:
